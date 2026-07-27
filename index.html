@@ -713,6 +713,7 @@ function buildRow(row){
   const delBtn = document.createElement('button');
   delBtn.className='del-btn'; delBtn.innerHTML='&times;'; delBtn.title='Delete row';
   delBtn.addEventListener('click', ()=>{
+    delBtn.blur();
     removeTaskDoc(row.id);
   });
   tdDel.appendChild(delBtn);
@@ -818,7 +819,11 @@ function renderAll(){
 }
 
 function isEditingInTable(){
-  return document.activeElement && tbody.contains(document.activeElement);
+  const el = document.activeElement;
+  if(!el || !tbody.contains(el)) return false;
+  const tag = el.tagName;
+  if(tag === 'BUTTON') return false;
+  return tag === 'INPUT' || tag === 'SELECT' || el.isContentEditable;
 }
 
 let pendingRerender = false;
