@@ -102,6 +102,20 @@
   .week-row input[type="text"]:hover,.week-row input[type="text"]:focus{
     border-color:var(--line-strong);background:var(--surface);outline:none;
   }
+  .week-row select{
+    font-family:'IBM Plex Mono',monospace;
+    font-size:13px;
+    font-weight:600;
+    color:var(--ink);
+    border:1px solid var(--line-strong);
+    background:var(--surface);
+    padding:6px 10px;
+    border-radius:8px;
+    cursor:pointer;
+    max-width:220px;
+  }
+  .week-row select:hover,.week-row select:focus{border-color:var(--accent);outline:none;}
+  .week-row .btn{padding:7px 12px;font-size:12.5px;}
 
   /* stamp: momentum ring */
   .stamp{
@@ -379,6 +393,51 @@
     .toolbar, .del-btn, .btn{display:none !important;}
     .sheet{box-shadow:none;}
   }
+
+  /* ===== NEW WEEK MODAL ===== */
+  .modal-overlay{
+    display:none;
+    position:fixed;inset:0;
+    background:rgba(24,26,51,0.42);
+    align-items:center;justify-content:center;
+    z-index:100;
+    padding:20px;
+    animation:fadeIn .18s ease both;
+  }
+  .modal-overlay.open{display:flex;}
+  @keyframes fadeIn{from{opacity:0;}to{opacity:1;}}
+  .modal-card{
+    background:var(--surface);
+    border-radius:16px;
+    box-shadow:var(--shadow-lift);
+    padding:24px 26px 22px;
+    width:100%;max-width:420px;
+    animation:riseIn .22s ease both;
+  }
+  .modal-card h3{
+    font-family:'Space Grotesk',sans-serif;font-size:19px;font-weight:800;
+    margin:0 0 16px;letter-spacing:-0.01em;color:var(--ink);
+  }
+  .modal-label{
+    display:block;font-size:12px;font-weight:600;color:var(--ink-soft);
+    margin-bottom:6px;font-family:'IBM Plex Mono',monospace;text-transform:uppercase;letter-spacing:.06em;
+  }
+  .modal-input{
+    width:100%;font-family:'Inter',sans-serif;font-size:14px;color:var(--ink);
+    border:1px solid var(--line-strong);border-radius:9px;padding:10px 12px;
+    margin-bottom:16px;background:var(--surface);
+  }
+  .modal-input:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft);}
+  .modal-check{
+    display:flex;align-items:flex-start;gap:9px;cursor:pointer;
+    font-size:13px;color:var(--ink);line-height:1.45;margin-bottom:22px;
+  }
+  .modal-check input[type="checkbox"]{
+    margin-top:2px;width:16px;height:16px;flex-shrink:0;accent-color:var(--accent);cursor:pointer;
+  }
+  .modal-check.disabled{opacity:.5;cursor:not-allowed;}
+  .modal-check.disabled input{cursor:not-allowed;}
+  .modal-actions{display:flex;justify-content:flex-end;gap:10px;}
 </style>
 </head>
 <body>
@@ -390,8 +449,10 @@
       <h1>Weekly Task Board</h1>
       <p class="tagline">Every cell you fill in moves the team forward. Update it now so everyone can see today's progress.</p>
       <div class="week-row">
-        <span style="font-size:13px;color:var(--ink-soft);">Week of:</span>
-        <input type="text" id="weekLabel" value="Nov 24 – 30, 2025" spellcheck="false">
+        <span style="font-size:13px;color:var(--ink-soft);">Tuần:</span>
+        <select id="weekSelect"></select>
+        <input type="text" id="weekLabelEdit" placeholder="Đổi tên tuần..." spellcheck="false">
+        <button class="btn" id="newWeekBtn" type="button">+ Tuần mới</button>
       </div>
     </div>
     <div class="stamp" id="stamp">
@@ -456,6 +517,22 @@
   <footer class="foot">DATA IS SYNCED IN REAL TIME VIA CLOUD FIRESTORE · SHARED WITH YOUR TEAM</footer>
 </div>
 
+<div class="modal-overlay" id="newWeekOverlay">
+  <div class="modal-card">
+    <h3>Tạo tuần mới</h3>
+    <label class="modal-label" for="newWeekNameInput">Tên tuần</label>
+    <input type="text" id="newWeekNameInput" class="modal-input" placeholder="Vd: Tuần 1 – 7/12/2025" spellcheck="false">
+    <label class="modal-check" id="newWeekCarryRow">
+      <input type="checkbox" id="newWeekCarryCheck" checked>
+      <span>Sao chép các công việc <b>chưa hoàn thành</b> của tuần hiện tại sang tuần mới</span>
+    </label>
+    <div class="modal-actions">
+      <button class="btn" id="newWeekCancelBtn" type="button">Hủy</button>
+      <button class="btn primary" id="newWeekConfirmBtn" type="button">Tạo tuần</button>
+    </div>
+  </div>
+</div>
+
 <script type="module">
 import { initializeApp } from "https://www.gstatic.com/firebasejs/12.16.0/firebase-app.js";
 import {
@@ -475,7 +552,8 @@ const firebaseConfig = {
 const app = initializeApp(firebaseConfig);
 const db = getFirestore(app);
 const tasksCol = collection(db, 'tasks');
-const weekDocRef = doc(db, 'meta', 'week');
+const weeksCol = collection(db, 'weeks');
+const weekDocRef = doc(db, 'meta', 'week'); // legacy label, used only for one-time migration
 const seededDocRef = doc(db, 'meta', 'seeded');
 
 function showConnError(message){
@@ -560,18 +638,177 @@ function seedData(){
   ];
 }
 
-let data = [];
+let data = [];       // ALL tasks, across every week
+let weeks = [];       // {id, label, order}
+let currentWeekId = null;
 
-const weekLabelInput = document.getElementById('weekLabel');
-const debWeekLabel = makeDebouncer();
-weekLabelInput.addEventListener('input', ()=>{
-  debWeekLabel(()=> setDoc(weekDocRef, { label: weekLabelInput.value }, { merge: true })
-    .catch(err=>console.error('Failed to save week label:', err)));
+const weekSelect = document.getElementById('weekSelect');
+const weekLabelEdit = document.getElementById('weekLabelEdit');
+const newWeekBtn = document.getElementById('newWeekBtn');
+
+function getWeekTasks(){
+  return data.filter(d=>d.weekId === currentWeekId);
+}
+
+function suggestNextWeekLabel(){
+  const current = weeks.find(w=>w.id===currentWeekId);
+  if(!current || !current.label) return 'Tuần mới';
+  const m = current.label.match(/(\d+)(?!.*\d)/); // last number in the label, if any
+  if(m){
+    const n = parseInt(m[1],10) + 1;
+    return current.label.slice(0,m.index) + n + current.label.slice(m.index+m[1].length);
+  }
+  return current.label + ' (tiếp theo)';
+}
+
+function renderWeekSelect(){
+  weekSelect.innerHTML = '';
+  weeks.forEach(w=>{
+    const o = document.createElement('option');
+    o.value = w.id; o.textContent = w.label || '(Chưa đặt tên)';
+    if(w.id === currentWeekId) o.selected = true;
+    weekSelect.appendChild(o);
+  });
+  const current = weeks.find(w=>w.id===currentWeekId);
+  if(document.activeElement !== weekLabelEdit){
+    weekLabelEdit.value = current ? (current.label || '') : '';
+  }
+}
+
+weekSelect.addEventListener('change', ()=>{
+  currentWeekId = weekSelect.value;
+  renderAll();
 });
-onSnapshot(weekDocRef, snap=>{
-  if(document.activeElement === weekLabelInput) return; // don't clobber active typing
-  const label = snap.exists() ? snap.data().label : null;
-  if(label) weekLabelInput.value = label;
+
+const debWeekLabel = makeDebouncer();
+weekLabelEdit.addEventListener('input', ()=>{
+  if(!currentWeekId) return;
+  const val = weekLabelEdit.value;
+  const w = weeks.find(w=>w.id===currentWeekId);
+  if(w) w.label = val;
+  renderWeekSelectOptionLabelOnly();
+  debWeekLabel(()=> updateDoc(doc(db,'weeks', currentWeekId), { label: val })
+    .catch(err=>console.error('Failed to rename week:', err)));
+});
+function renderWeekSelectOptionLabelOnly(){
+  const opt = weekSelect.querySelector(`option[value="${currentWeekId}"]`);
+  if(opt) opt.textContent = weekLabelEdit.value || '(Chưa đặt tên)';
+}
+
+const newWeekOverlay = document.getElementById('newWeekOverlay');
+const newWeekNameInput = document.getElementById('newWeekNameInput');
+const newWeekCarryCheck = document.getElementById('newWeekCarryCheck');
+const newWeekCarryRow = document.getElementById('newWeekCarryRow');
+
+function openNewWeekModal(){
+  newWeekNameInput.value = suggestNextWeekLabel();
+  const hasUnfinished = getWeekTasks().some(d=>d.status !== 'Done');
+  newWeekCarryCheck.checked = hasUnfinished;
+  newWeekCarryCheck.disabled = !hasUnfinished;
+  newWeekCarryRow.classList.toggle('disabled', !hasUnfinished);
+  newWeekCarryRow.querySelector('span').textContent = hasUnfinished
+    ? 'Sao chép các công việc chưa hoàn thành của tuần hiện tại sang tuần mới'
+    : 'Không có công việc nào chưa hoàn thành để sao chép';
+  newWeekOverlay.classList.add('open');
+  newWeekNameInput.focus();
+  newWeekNameInput.select();
+}
+function closeNewWeekModal(){
+  newWeekOverlay.classList.remove('open');
+}
+
+newWeekBtn.addEventListener('click', openNewWeekModal);
+document.getElementById('newWeekCancelBtn').addEventListener('click', closeNewWeekModal);
+newWeekOverlay.addEventListener('click', e=>{ if(e.target === newWeekOverlay) closeNewWeekModal(); });
+newWeekNameInput.addEventListener('keydown', e=>{
+  if(e.key==='Enter'){ e.preventDefault(); document.getElementById('newWeekConfirmBtn').click(); }
+  if(e.key==='Escape'){ closeNewWeekModal(); }
+});
+
+document.getElementById('newWeekConfirmBtn').addEventListener('click', async ()=>{
+  const label = newWeekNameInput.value.trim();
+  if(!label){ newWeekNameInput.focus(); return; }
+  const carryOver = !newWeekCarryCheck.disabled && newWeekCarryCheck.checked;
+  const confirmBtn = document.getElementById('newWeekConfirmBtn');
+  confirmBtn.disabled = true;
+  try{
+    const newOrder = weeks.length ? Math.max(...weeks.map(w=>w.order||0)) + 1 : 1;
+    const newWeekRef = await addDoc(weeksCol, { label, order: newOrder });
+    if(carryOver){
+      const unfinished = getWeekTasks().filter(d=>d.status !== 'Done');
+      await Promise.all(unfinished.map((t,i)=> addDoc(tasksCol, {
+        task: t.task || '', person: t.person || '', priority: t.priority || 'Medium',
+        deadline: t.deadline || '', status: 'Not Started', percent: 0,
+        metrics: (t.metrics||[]).map(m=>({ ...m })), results: [],
+        weekId: newWeekRef.id, order: (i+1)*1000
+      })));
+    }
+    currentWeekId = newWeekRef.id;
+    closeNewWeekModal();
+  }catch(err){
+    console.error('Failed to create new week:', err);
+    showConnError('Không thể tạo tuần mới (' + err.message + '). Kiểm tra kết nối mạng hoặc quyền ghi Firestore.');
+    closeNewWeekModal();
+  }finally{
+    confirmBtn.disabled = false;
+  }
+});
+
+// One-time migration: if no "weeks" documents exist yet, create the first
+// week and attach any task that has no weekId to it (covers boards created
+// before weekly grouping existed).
+let migratingWeeks = false;
+async function migrateToWeeks(){
+  if(migratingWeeks) return;
+  migratingWeeks = true;
+  try{
+    let label = 'Tuần hiện tại';
+    try{
+      const oldWeekSnap = await getDoc(weekDocRef);
+      if(oldWeekSnap.exists() && oldWeekSnap.data().label) label = oldWeekSnap.data().label;
+    }catch(e){ /* ignore, legacy doc may not exist */ }
+    const weekRef = await addDoc(weeksCol, { label, order: 1 });
+    const existingTasks = await getDocs(tasksCol);
+    await Promise.all(existingTasks.docs.map(d=>{
+      if(!d.data().weekId){
+        return updateDoc(doc(db,'tasks', d.id), { weekId: weekRef.id });
+      }
+      return null;
+    }));
+  }catch(err){
+    console.error('Failed to migrate to weekly boards:', err);
+    showConnError('Không thể khởi tạo dữ liệu theo tuần. Lỗi: ' + err.message);
+  }finally{
+    migratingWeeks = false;
+  }
+}
+
+// Safety net: assigns any task missing a weekId (e.g. seeded while the
+// migration was still running) to the oldest known week.
+function fixOrphanTasks(){
+  if(weeks.length === 0) return;
+  const targetWeekId = weeks[0].id;
+  data.filter(d=>!d.weekId).forEach(d=>{
+    updateDoc(doc(db,'tasks', d.id), { weekId: targetWeekId })
+      .catch(err=>console.error('Failed to fix orphan task:', err));
+  });
+}
+
+onSnapshot(query(weeksCol, orderBy('order')), snap=>{
+  weeks = snap.docs.map(d=>({ id:d.id, ...d.data() }));
+  if(weeks.length === 0){
+    migrateToWeeks();
+    return; // migration will trigger this snapshot again once the week exists
+  }
+  if(!currentWeekId || !weeks.find(w=>w.id===currentWeekId)){
+    currentWeekId = weeks[weeks.length-1].id; // most recently created week
+  }
+  renderWeekSelect();
+  fixOrphanTasks();
+  renderAll();
+}, err=>{
+  console.error('Weeks sync error:', err);
+  showConnError('Không tải được danh sách tuần (' + err.message + ').');
 });
 
 function isOverdue(row){
@@ -819,7 +1056,7 @@ function applyBadgeStyle(selectEl, value){
 
 function getFiltered(){
   const p = filterPerson.value, s = filterStatus.value, q = searchBox.value.trim().toLowerCase();
-  return data.filter(r=>{
+  return getWeekTasks().filter(r=>{
     if(p && r.person !== p) return false;
     if(s && r.status !== s) return false;
     if(q && !(r.task||'').toLowerCase().includes(q)) return false;
@@ -847,7 +1084,7 @@ function renderTable(){
 
 function renderPersonFilter(){
   const current = filterPerson.value;
-  const people = Array.from(new Set(data.map(d=>d.person).filter(Boolean))).sort();
+  const people = Array.from(new Set(getWeekTasks().map(d=>d.person).filter(Boolean))).sort();
   filterPerson.innerHTML = '<option value="">All Assignees</option>';
   people.forEach(p=>{
     const o = document.createElement('option'); o.value=p; o.textContent=p;
@@ -857,11 +1094,12 @@ function renderPersonFilter(){
 }
 
 function refreshAggregates(){
-  const total = data.length;
-  const done = data.filter(d=>d.status==='Done').length;
-  const doing = data.filter(d=>d.status==='In Progress').length;
-  const overdue = data.filter(isOverdue).length;
-  const avg = total ? Math.round(data.reduce((s,d)=>s+(d.percent||0),0)/total) : 0;
+  const weekTasks = getWeekTasks();
+  const total = weekTasks.length;
+  const done = weekTasks.filter(d=>d.status==='Done').length;
+  const doing = weekTasks.filter(d=>d.status==='In Progress').length;
+  const overdue = weekTasks.filter(isOverdue).length;
+  const avg = total ? Math.round(weekTasks.reduce((s,d)=>s+(d.percent||0),0)/total) : 0;
 
   document.getElementById('statTotal').textContent = total;
   document.getElementById('statDone').textContent = done;
@@ -877,13 +1115,13 @@ function refreshAggregates(){
 
   // people grid
   const grid = document.getElementById('peopleGrid');
-  const people = Array.from(new Set(data.map(d=>d.person).filter(Boolean))).sort();
+  const people = Array.from(new Set(weekTasks.map(d=>d.person).filter(Boolean))).sort();
   grid.innerHTML = '';
   if(people.length===0){
     grid.innerHTML = '<div class="empty-note">No tasks assigned to anyone yet. Add a task and assign someone to start tracking.</div>';
   }
   people.forEach(person=>{
-    const rows = data.filter(d=>d.person===person);
+    const rows = weekTasks.filter(d=>d.person===person);
     const pTotal = rows.length;
     const pDone = rows.filter(d=>d.status==='Done').length;
     const pAvg = pTotal ? Math.round(rows.reduce((s,d)=>s+(d.percent||0),0)/pTotal) : 0;
@@ -932,6 +1170,7 @@ ensureSeeded().then(()=>{
       if(!Array.isArray(row.results)) row.results = [];
       return row;
     });
+    fixOrphanTasks();
     if(isEditingInTable()){
       pendingRerender = true;
     }else{
@@ -947,8 +1186,10 @@ ensureSeeded().then(()=>{
 });
 
 document.getElementById('addRowBtn').addEventListener('click', async ()=>{
-  const nextOrder = data.length ? Math.max(...data.map(d=>d.order||0)) + 1000 : 1000;
-  await addTaskDoc({ task:'', person:'', priority:'Medium', deadline:'', status:'Not Started', percent:0, metrics:[], results:[], order: nextOrder });
+  if(!currentWeekId){ showConnError('Đang khởi tạo dữ liệu tuần, vui lòng thử lại sau vài giây.'); return; }
+  const weekTasks = getWeekTasks();
+  const nextOrder = weekTasks.length ? Math.max(...weekTasks.map(d=>d.order||0)) + 1000 : 1000;
+  await addTaskDoc({ task:'', person:'', priority:'Medium', deadline:'', status:'Not Started', percent:0, metrics:[], results:[], order: nextOrder, weekId: currentWeekId });
 });
 
 filterPerson.addEventListener('change', renderTable);
@@ -957,7 +1198,7 @@ searchBox.addEventListener('input', renderTable);
 
 document.getElementById('exportBtn').addEventListener('click', ()=>{
   const header = ['Task','Assignee','Priority','Due Date','Status','% Done','Goals','Result'];
-  const rows = data.map(r=>[
+  const rows = getFiltered().map(r=>[
     r.task,r.person,r.priority,r.deadline,r.status,r.percent,
     (r.metrics||[]).filter(m=>m.name||m.value).map(m=>m.name+': '+m.value).join(' | '),
     (r.results||[]).filter(m=>m.name||m.value).map(m=>m.name+': '+m.value).join(' | ')
@@ -967,8 +1208,10 @@ document.getElementById('exportBtn').addEventListener('click', ()=>{
   ).join('\n');
   const blob = new Blob(['\uFEFF'+csv], {type:'text/csv;charset=utf-8;'});
   const url = URL.createObjectURL(blob);
+  const currentLabel = (weeks.find(w=>w.id===currentWeekId)||{}).label || 'weekly-tasks';
+  const safeName = currentLabel.replace(/[^\p{L}\p{N}]+/gu, '-').replace(/^-+|-+$/g,'') || 'weekly-tasks';
   const a = document.createElement('a');
-  a.href = url; a.download = 'weekly-tasks.csv';
+  a.href = url; a.download = safeName + '.csv';
   a.click();
   URL.revokeObjectURL(url);
 });
