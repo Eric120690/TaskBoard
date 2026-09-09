@@ -420,12 +420,23 @@
   }
   .jobdesc-name:focus{background:var(--accent-soft);}
   .jobdesc-name:empty:before{content:attr(data-placeholder);color:var(--ink-faint);font-weight:600;}
+  .jobdesc-toolbar{display:flex;flex-wrap:wrap;gap:4px;margin-bottom:6px;}
+  .jd-tb-btn{
+    font-family:'IBM Plex Mono',monospace;font-size:11px;font-weight:700;
+    border:1px solid var(--line-strong);background:var(--surface);color:var(--ink-soft);
+    border-radius:6px;padding:3px 8px;cursor:pointer;line-height:1.4;
+    transition:.15s ease;
+  }
+  .jd-tb-btn:hover{border-color:var(--accent);color:var(--accent-ink);background:var(--accent-soft);}
   .jobdesc-desc{
     font-family:'Inter',sans-serif;font-size:13px;line-height:1.6;color:var(--ink-soft);
     min-height:70px;padding:4px;border-radius:6px;outline:none;white-space:pre-wrap;
   }
   .jobdesc-desc:focus{background:#FAFAFE;box-shadow:0 0 0 2px var(--accent-soft);}
   .jobdesc-desc:empty:before{content:attr(data-placeholder);color:var(--ink-faint);font-style:italic;}
+  .jobdesc-desc p{margin:0 0 6px;}
+  .jobdesc-desc p:last-child{margin-bottom:0;}
+  .jobdesc-desc b, .jobdesc-desc strong{font-weight:700;color:var(--ink);}
   .jobdesc-del{
     position:absolute;top:12px;right:12px;
     background:transparent;border:none;color:var(--ink-faint);cursor:pointer;
@@ -723,9 +734,12 @@ function removeJobDescDoc(id){
 
 function seedJobDescData(){
   return [
-    {person:'Alex Nguyen', description:'Phụ trách tổng hợp báo cáo tháng, theo dõi tiến độ chung của nhóm và làm việc trực tiếp với ban lãnh đạo.'},
-    {person:'Bao Tran', description:'Thiết kế ấn phẩm quảng cáo, banner theo tuần và hỗ trợ dựng nội dung hình ảnh cho các chiến dịch marketing.'},
-    {person:'Ha Thu', description:'Phát triển quan hệ đối tác, chăm sóc khách hàng mới và theo dõi hợp đồng hợp tác.'}
+    {person:'Alex Nguyen', description:
+      '<b>Nhiệm vụ chính:</b><br>Tổng hợp báo cáo tháng cho ban lãnh đạo<br>Theo dõi tiến độ chung của cả nhóm'},
+    {person:'Bao Tran', description:
+      '<b>Nhiệm vụ chính:</b><br>Thiết kế ấn phẩm quảng cáo, banner theo tuần<br>Dựng nội dung hình ảnh cho chiến dịch marketing'},
+    {person:'Ha Thu', description:
+      '<b>Nhiệm vụ chính:</b><br>Phát triển quan hệ đối tác<br>Chăm sóc khách hàng mới'}
   ];
 }
 
@@ -1296,15 +1310,38 @@ function buildJobDescCard(item){
   });
   nameEl.addEventListener('keydown', e=>{ if(e.key==='Enter'){ e.preventDefault(); nameEl.blur(); } });
 
+  const toolbar = document.createElement('div');
+  toolbar.className = 'jobdesc-toolbar';
+
   const descEl = document.createElement('div');
   descEl.className = 'jobdesc-desc';
   descEl.contentEditable = 'true';
   descEl.setAttribute('data-placeholder', 'Mô tả nhiệm vụ, vai trò chính của người này...');
-  descEl.textContent = item.description || '';
+  descEl.innerHTML = item.description || '';
+  descEl.addEventListener('focus', ()=>{
+    try{ document.execCommand('defaultParagraphSeparator', false, 'br'); }catch(e){}
+  });
   const debDesc = makeDebouncer();
   descEl.addEventListener('input', ()=>{
-    debDesc(()=> patchJobDesc(item.id, { description: descEl.textContent }));
+    debDesc(()=> patchJobDesc(item.id, { description: descEl.innerHTML }));
   });
+
+  function tbBtn(label, title, run){
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'jd-tb-btn';
+    b.textContent = label;
+    b.title = title;
+    // keep the text selection inside descEl when clicking the toolbar
+    b.addEventListener('mousedown', e=> e.preventDefault());
+    b.addEventListener('click', ()=>{
+      descEl.focus();
+      run();
+      descEl.dispatchEvent(new Event('input', { bubbles:true }));
+    });
+    return b;
+  }
+  toolbar.appendChild(tbBtn('B', 'In đậm (Ctrl+B)', ()=> document.execCommand('bold')));
 
   const delBtn = document.createElement('button');
   delBtn.className = 'jobdesc-del';
@@ -1314,6 +1351,7 @@ function buildJobDescCard(item){
   delBtn.addEventListener('click', ()=> removeJobDescDoc(item.id));
 
   card.appendChild(nameEl);
+  card.appendChild(toolbar);
   card.appendChild(descEl);
   card.appendChild(delBtn);
   return card;
