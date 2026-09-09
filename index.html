@@ -375,6 +375,65 @@
   .person-pct{font-family:'IBM Plex Mono',monospace;font-size:11.5px;color:var(--ink-soft);text-align:right;font-weight:600;}
   .empty-note{color:var(--ink-faint);font-size:13px;font-style:italic;}
 
+  /* ===== TABS ===== */
+  .tabs{
+    display:flex;gap:6px;margin-bottom:20px;
+    border-bottom:1px solid var(--line-strong);
+    animation:riseIn .5s ease both;
+  }
+  .tab-btn{
+    font-family:'Inter',sans-serif;
+    font-size:13.5px;font-weight:700;
+    color:var(--ink-soft);
+    background:transparent;border:none;
+    padding:10px 18px 12px;
+    cursor:pointer;
+    position:relative;
+    display:inline-flex;align-items:center;gap:7px;
+    transition:color .15s;
+    top:1px;
+  }
+  .tab-btn:hover{color:var(--accent-ink);}
+  .tab-btn.active{color:var(--accent-ink);}
+  .tab-btn.active::after{
+    content:"";position:absolute;left:8px;right:8px;bottom:-1px;height:2.5px;
+    background:linear-gradient(90deg,var(--accent),var(--accent-2));border-radius:2px 2px 0 0;
+  }
+  .tab-panel{display:none;}
+  .tab-panel.active{display:block;}
+
+  /* ===== JOB DESCRIPTIONS ===== */
+  .jobdesc-header{display:flex;justify-content:space-between;align-items:flex-start;gap:16px;margin-bottom:18px;flex-wrap:wrap;}
+  .jobdesc-list{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:16px;}
+  .jobdesc-card{
+    position:relative;
+    background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);
+    box-shadow:var(--shadow);padding:16px 18px 14px;
+    transition:transform .18s ease, box-shadow .18s ease;
+    animation:rowIn .35s ease both;
+  }
+  .jobdesc-card:hover{transform:translateY(-2px);box-shadow:var(--shadow-lift);}
+  .jobdesc-card::before{content:"";position:absolute;top:0;left:0;right:0;height:3px;border-radius:var(--radius) var(--radius) 0 0;background:linear-gradient(90deg,var(--accent),var(--accent-2));}
+  .jobdesc-name{
+    font-family:'Space Grotesk',sans-serif;font-size:16px;font-weight:700;color:var(--ink);
+    margin-bottom:8px;padding:2px 4px;border-radius:6px;outline:none;
+  }
+  .jobdesc-name:focus{background:var(--accent-soft);}
+  .jobdesc-name:empty:before{content:attr(data-placeholder);color:var(--ink-faint);font-weight:600;}
+  .jobdesc-desc{
+    font-family:'Inter',sans-serif;font-size:13px;line-height:1.6;color:var(--ink-soft);
+    min-height:70px;padding:4px;border-radius:6px;outline:none;white-space:pre-wrap;
+  }
+  .jobdesc-desc:focus{background:#FAFAFE;box-shadow:0 0 0 2px var(--accent-soft);}
+  .jobdesc-desc:empty:before{content:attr(data-placeholder);color:var(--ink-faint);font-style:italic;}
+  .jobdesc-del{
+    position:absolute;top:12px;right:12px;
+    background:transparent;border:none;color:var(--ink-faint);cursor:pointer;
+    opacity:0;transition:opacity .15s,color .15s;padding:2px;
+  }
+  .jobdesc-card:hover .jobdesc-del{opacity:1;}
+  .jobdesc-del:hover{color:var(--bad);}
+
   footer.foot{
     text-align:center;margin-top:26px;font-size:11px;color:var(--ink-faint);
     font-family:'IBM Plex Mono',monospace;letter-spacing:.04em;
@@ -463,6 +522,13 @@
     </div>
   </div>
 
+  <div class="tabs" role="tablist">
+    <button class="tab-btn active" id="tabBtn-board" data-tab="board" type="button" role="tab">📋 Bảng công việc</button>
+    <button class="tab-btn" id="tabBtn-jobdesc" data-tab="jobdesc" type="button" role="tab">🧾 Mô tả công việc</button>
+  </div>
+
+  <div class="tab-panel active" id="tabPanel-board">
+
   <div class="stats">
     <div class="stat-card accent"><div class="n" id="statTotal">0</div><div class="l">Total Tasks</div></div>
     <div class="stat-card good"><div class="n" id="statDone">0</div><div class="l">Completed</div></div>
@@ -514,6 +580,21 @@
     <div class="people-grid" id="peopleGrid"></div>
   </div>
 
+  </div><!-- /tabPanel-board -->
+
+  <div class="tab-panel" id="tabPanel-jobdesc">
+    <div class="review">
+      <div class="jobdesc-header">
+        <div>
+          <h2>Mô tả công việc nhân sự</h2>
+          <div class="sub">Ghi rõ vai trò, nhiệm vụ chính của từng thành viên trong nhóm — cập nhật bất cứ lúc nào.</div>
+        </div>
+        <button class="btn primary" id="addJobDescBtn" type="button">+ Thêm nhân sự</button>
+      </div>
+      <div class="jobdesc-list" id="jobDescList"></div>
+    </div>
+  </div><!-- /tabPanel-jobdesc -->
+
   <footer class="foot">DATA IS SYNCED IN REAL TIME VIA CLOUD FIRESTORE · SHARED WITH YOUR TEAM</footer>
 </div>
 
@@ -553,8 +634,10 @@ const app = initializeApp(firebaseConfig);
 const db = getFirestore(app);
 const tasksCol = collection(db, 'tasks');
 const weeksCol = collection(db, 'weeks');
+const jobDescCol = collection(db, 'jobDescriptions');
 const weekDocRef = doc(db, 'meta', 'week'); // legacy label, used only for one-time migration
 const seededDocRef = doc(db, 'meta', 'seeded');
+const seededJobDescDocRef = doc(db, 'meta', 'seededJobDesc');
 
 function showConnError(message){
   if(document.getElementById('fbErrorBanner')) return;
@@ -612,6 +695,51 @@ async function ensureSeeded(){
       + '<code>weekly-task-board</code> Firebase project and that its security rules allow read/write access. '
       + 'Error: ' + err.message
     );
+  }
+}
+
+async function addJobDescDoc(docData){
+  try{
+    await addDoc(jobDescCol, docData);
+  }catch(err){
+    console.error('Failed to add job description:', err);
+    showConnError('Could not add the entry to the shared board (' + err.message + '). Check your internet connection and the Firestore security rules for this project.');
+  }
+}
+
+function patchJobDesc(id, patch){
+  updateDoc(doc(db, 'jobDescriptions', id), patch).catch(err=>{
+    console.error('Failed to save job description:', err);
+    showConnError('Could not save your change to the shared board (' + err.message + '). Check your internet connection and the Firestore security rules for this project.');
+  });
+}
+
+function removeJobDescDoc(id){
+  deleteDoc(doc(db, 'jobDescriptions', id)).catch(err=>{
+    console.error('Failed to delete job description:', err);
+    showConnError('Could not delete the entry from the shared board (' + err.message + ').');
+  });
+}
+
+function seedJobDescData(){
+  return [
+    {person:'Alex Nguyen', description:'Phụ trách tổng hợp báo cáo tháng, theo dõi tiến độ chung của nhóm và làm việc trực tiếp với ban lãnh đạo.'},
+    {person:'Bao Tran', description:'Thiết kế ấn phẩm quảng cáo, banner theo tuần và hỗ trợ dựng nội dung hình ảnh cho các chiến dịch marketing.'},
+    {person:'Ha Thu', description:'Phát triển quan hệ đối tác, chăm sóc khách hàng mới và theo dõi hợp đồng hợp tác.'}
+  ];
+}
+
+async function ensureJobDescSeeded(){
+  try{
+    const seededSnap = await getDoc(seededJobDescDocRef);
+    if(seededSnap.exists()) return;
+    const seed = seedJobDescData();
+    await Promise.all(seed.map((row, i)=>
+      setDoc(doc(db, 'jobDescriptions', 'jobdesc-seed-' + (i + 1)), { ...row, order: (i + 1) * 1000 })
+    ));
+    await setDoc(seededJobDescDocRef, { seeded: true });
+  }catch(err){
+    console.error('Failed to seed job description data:', err);
   }
 }
 
@@ -1142,6 +1270,105 @@ function renderAll(){
   renderTable();
   refreshAggregates();
 }
+
+// ---- Job descriptions tab -------------------------------------------------
+let jobDescData = [];
+const jobDescList = document.getElementById('jobDescList');
+
+function isEditingInJobDesc(){
+  const el = document.activeElement;
+  if(!el || !jobDescList.contains(el)) return false;
+  return el.isContentEditable;
+}
+
+function buildJobDescCard(item){
+  const card = document.createElement('div');
+  card.className = 'jobdesc-card';
+
+  const nameEl = document.createElement('div');
+  nameEl.className = 'jobdesc-name';
+  nameEl.contentEditable = 'true';
+  nameEl.setAttribute('data-placeholder', 'Tên nhân sự...');
+  nameEl.textContent = item.person || '';
+  const debName = makeDebouncer();
+  nameEl.addEventListener('input', ()=>{
+    debName(()=> patchJobDesc(item.id, { person: nameEl.textContent.trim() }));
+  });
+  nameEl.addEventListener('keydown', e=>{ if(e.key==='Enter'){ e.preventDefault(); nameEl.blur(); } });
+
+  const descEl = document.createElement('div');
+  descEl.className = 'jobdesc-desc';
+  descEl.contentEditable = 'true';
+  descEl.setAttribute('data-placeholder', 'Mô tả nhiệm vụ, vai trò chính của người này...');
+  descEl.textContent = item.description || '';
+  const debDesc = makeDebouncer();
+  descEl.addEventListener('input', ()=>{
+    debDesc(()=> patchJobDesc(item.id, { description: descEl.textContent }));
+  });
+
+  const delBtn = document.createElement('button');
+  delBtn.className = 'jobdesc-del';
+  delBtn.type = 'button';
+  delBtn.title = 'Xóa';
+  delBtn.innerHTML = '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/></svg>';
+  delBtn.addEventListener('click', ()=> removeJobDescDoc(item.id));
+
+  card.appendChild(nameEl);
+  card.appendChild(descEl);
+  card.appendChild(delBtn);
+  return card;
+}
+
+function renderJobDescList(){
+  jobDescList.innerHTML = '';
+  if(jobDescData.length === 0){
+    jobDescList.innerHTML = '<div class="empty-note">Chưa có mô tả công việc nào. Nhấn "+ Thêm nhân sự" để bắt đầu.</div>';
+    return;
+  }
+  jobDescData.forEach(item=> jobDescList.appendChild(buildJobDescCard(item)));
+}
+
+let jobDescPendingRerender = false;
+jobDescList.addEventListener('focusout', ()=>{
+  setTimeout(()=>{
+    if(jobDescPendingRerender && !isEditingInJobDesc()){
+      jobDescPendingRerender = false;
+      renderJobDescList();
+    }
+  }, 0);
+});
+
+document.getElementById('addJobDescBtn').addEventListener('click', async ()=>{
+  const nextOrder = jobDescData.length ? Math.max(...jobDescData.map(d=>d.order||0)) + 1000 : 1000;
+  await addJobDescDoc({ person:'', description:'', order: nextOrder });
+});
+
+ensureJobDescSeeded().then(()=>{
+  onSnapshot(query(jobDescCol, orderBy('order')), snapshot=>{
+    jobDescData = snapshot.docs.map(d=> ({ id: d.id, ...d.data() }));
+    if(isEditingInJobDesc()){
+      jobDescPendingRerender = true;
+    }else{
+      renderJobDescList();
+    }
+  }, err=>{
+    console.error('Job description sync error:', err);
+    showConnError(
+      'Lost connection to the job description board (' + err.message + '). Check your internet connection, '
+      + 'or make sure the Firestore security rules for this project allow read/write access.'
+    );
+  });
+});
+
+// ---- Tab switching ---------------------------------------------------------
+document.querySelectorAll('.tab-btn').forEach(btn=>{
+  btn.addEventListener('click', ()=>{
+    document.querySelectorAll('.tab-btn').forEach(b=> b.classList.remove('active'));
+    document.querySelectorAll('.tab-panel').forEach(p=> p.classList.remove('active'));
+    btn.classList.add('active');
+    document.getElementById('tabPanel-' + btn.dataset.tab).classList.add('active');
+  });
+});
 
 function isEditingInTable(){
   const el = document.activeElement;
